@@ -136,7 +136,10 @@ if __name__ == '__main__':
     ja s'ha reanomenat i hem de llegir el darrer fitxer mogut a la carpeta C:\Users\<USERNAME>\OneDrive\-\Python\Berlys\
     amb el format %Y/%m/%d.txt que contindrà les dades que ens interessen.
     """
-    tomorrow = datetime.now() + timedelta(days=1)
+    set_local_env(time_cat, 'Catalan_Andorra.UTF-8')
+    date = DateHandler()
+    date.tomorrow()
+    wd = date.get_weekday()
 
     source = FileSource()
     source.set_root((path.home(), 'Downloads'))
@@ -144,7 +147,7 @@ if __name__ == '__main__':
         path.cwd(),
         'dades',
         'Berlys',
-        date_path = datetime.strftime(tomorrow, '%Y$s%m'.replace('$s', os.path.sep)),
+        date_path = datetime.strftime(date.to_date(), '%Y$s%m'.replace('$s', os.path.sep)),
         reset=True
     )
     source.set_original_filename(r'Volumen Rutas.txt')
@@ -160,8 +163,4 @@ if __name__ == '__main__':
         'dv.': (678, 679, 681),
         'ds.': (679, 681)
     }
-    set_local_env(time_cat, 'Catalan_Andorra.UTF-8')
-    weekday = DateHandler()
-    weekday.tomorrow()
-    wd = weekday.get_weekday()
     route.routing(week_routes[wd])
