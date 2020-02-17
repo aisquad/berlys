@@ -1,144 +1,52 @@
 # -*- coding: utf-8 -*-
 # ! c:\python\python3
-import email
-import imaplib
+
+"""
+    Programa que imprimeix per pantalla les rutes assignades al repartidor o totes les assignades a l'empressa.
+
+    L'opció manual -d carrega el fitxer anomenat "Volumen Rutas.txt" de la carpeta de descàrregues ../../../Downloads
+    que s'haurà descarregat prèviament des del navegador consultant el correu electrònic manualment. Aleshores obtenim
+    les dades i reanomenem el fitxer a la carpeta amb el nom: "Volumen Rutas <DATA REPARTIMENT>.txt" dins de la carpeta
+    d'arxiu     anomenada ../../data/<ANY ACTUAL>/<MES ACTUAL>. L'esmentat paràmetre <DATA REPARTIMENT> és la data de
+    repartiment,     normalment del dia posterior al de la descàrrega del fitxer i <ANY ACTUAL> i <MES ACTUAL> són l'any
+    i el mes en curs respectivament.
+
+    Si no es troba el fitxer dins de la carpèta de descàrregues, se recerca a la carpeta
+    ../../data/<ANY ACTUAL>/<MES ACTUAL> i se n'extrau les dades.
+
+    Si es passa l'opció -g, descarreguem el fitxer directament del correu a la carpeta ../../data/attachments
+    s'alça còpia a la carpeta ../../data/<ANY ACTUAL>/<MES ACTUAL> i s'aprofiten les dades per a obtindre els
+    clients de la ruta/rutes assignades al repartidor o a tota l'empresa depenent si s'ha triat l'opció -r o --all.
+
+    - Amb l'opció -r [r1 [r2 ][...]] especifiquem quines rutes mostrar, seran les rutes assignades a un repartidor.
+    - L'opció --all mostrarà totes les rutes assignades a l'empresa.
+
+    Segons el dia de la setmana hi ha unes rutes assignades per defecte al repartidor de manera que l'opció -d, sense
+    especificar rutes.
+"""
+
 import json
 import os
 import re
 
 from argparse import ArgumentParser as argparser
-from datetime import datetime, timedelta
-from re import search
-from pathlib import Path as path
+from datetime import datetime
 from locale import setlocale as set_local_env, LC_TIME as time_cat, atof as string_to_float, \
     format_string as local_env_fmt
+from pathlib import Path as path
+from re import search
 
+from Berlys.getmail import GetMail
 from core import DateHandler
 
 
-class Gmail:
+class Config:
     def __init__(self):
-        self.detach_dir = "."
-        self.config = None
-        self.session = None
+        self.filename = os.path.join('..', '..', "resources", "python-berlys-config.json")
 
     def get_config(self):
-        filename = os.path.join(self.detach_dir, "selae", "data", "config.json")
-        with open(filename) as f:
-            self.config = json.load(f)
-
-    def set_session(self):
-        self.session = imaplib.IMAP4_SSL(self.config['imap'])
-
-    def login(self):
-        self.get_config()
-        self.set_session()
-        email_address = f"{self.config['usr_email']}@{self.config['srv_email']}"
-        type_, account_details = self.session.login(email_address, self.config['password'])
-        if type_ != 'OK':
-            raise Exception('Not able to sign in!')
-
-    def check_dir(self):
-        if 'attachments' not in os.listdir(self.detach_dir):
-            os.mkdir('attachments')
-
-    def optimize_size(self, params):
-        if params.get('size'):
-            params['size'] = int(params['size'])
-
-    def optimize_date(self, params, key_header):
-        dt = datetime.strptime(params[f'{key_header}-date'], "%a, %d %b %Y %H:%M:%S %Z")
-        params[f'{key_header}-date'] = int(datetime.timestamp(dt))
-
-    def optimize_dates(self, params):
-        if params.get('creation-date'):
-            self.optimize_date(params, 'creation')
-        if params.get('modification-date'):
-            self.optimize_date(params, 'modification')
-
-    def parse_params(self, string):
-        string = string.replace("\r\n\t", "").replace("\"", "").replace("; ", ";")
-        params = dict([(item, "") if item.count("=") == 0 else tuple(item.split("=")) for item in string.split(";")])
-        self.optimize_size(params)
-        self.optimize_dates(params)
-        return params
-
-    def discard_parts(self, part):
-        if part.is_multipart():
-            # print ("#1 SKIPPING multipart")
-            return True
-        elif not part.get_content_disposition():
-            # print ("#2 SKIPPING no content disposition")
-            return True
-        return False
-
-    def wanted(self, filename_ext):
-        if filename_ext and filename_ext.startswith(self.config["subject"]):
-            return True
-
-    def download_file(self, filename_ext, part):
-        params = self.parse_params(part.get("Content-Disposition"))
-        cdate = datetime.fromtimestamp(params['creation-date'])
-        next_day = cdate + timedelta(days=1)
-        filename, ext = os.path.splitext(filename_ext)
-        new_filename = f"{filename} {next_day.strftime('%Y-%m-%d')}{ext}"
-        file_path = os.path.join(self.detach_dir, 'attachments', new_filename)
-        if not os.path.isfile(file_path):
-            print(f"creating '{new_filename}'.")
-            try:
-                with open(file_path, 'wb') as fp:
-                    fp.write(part.get_payload(decode=True))
-            except OSError as e:
-                print("Rejecting", e, part.get_filename())
-        else:
-            print(f"filename '{new_filename}' already exists.")
-
-    def mail_sweep(self, email_body):
-        mail = email.message_from_string(email_body.decode())
-        for part in mail.walk():
-            if self.discard_parts(part):
-                continue
-
-            filename_ext = part.get_filename()
-
-            if self.wanted(filename_ext):
-                self.download_file(filename_ext, part)
-
-    def iterate(self, data):
-        # Iterating over all emails
-        for msg_id in data:
-            type_, message_parts = self.session.fetch(msg_id, '(RFC822)')
-
-            if type_ != 'OK':
-                print('Error fetching mail.')
-                break
-
-            self.mail_sweep(message_parts[0][1])
-
-    def dispatch(self):
-        self.check_dir()
-
-        self.session.select("Berly's")
-        since_date = datetime.today() - timedelta(days=7)
-        set_local_env(time_cat, "en_US.UTF8")
-        since_date = since_date.strftime("%d-%b-%Y")
-        type_, data = self.session.search(
-            None,
-            f'(SUBJECT "{self.config["subject"]}")',
-            f'SENTSINCE {since_date} FROM {self.config["sender"]}'
-        )
-        if type_ != 'OK':
-            print('Error searching Inbox.')
-            return
-
-        data = data[0].split()
-        data.sort()
-        data.reverse()
-        self.iterate(data)
-
-    def close(self):
-        self.session.close()
-        self.session.logout()
+        with open(self.filename) as f:
+            return json.load(f)
 
 
 class DirSource:
@@ -186,75 +94,103 @@ class DirSource:
                 weekdays[wday][rt] = list(weekdays[wday][rt])
         print(json.dumps(weekdays, indent=4))
 
+    def routes_by_weekday(self):
+        self.root = r"C:\Users\igorr\OneDrive\scripts\data\berlys\data"
+        print(self.root)
+        self.run()
+
 
 class FileSource:
     def __init__(self):
-        # Java Style Constructor
-        self.root = ''
-        self.destination = ''
-        self.absolute_path_filename = ''
-        self.original_filename = ''
-        self.filename = ''
+        self.read_folder = ''
+        self.read_filename = ''
+        self.write_folder = ''
+        self.write_filename = ''
         self.lines = ''
+        self.default_filename = ''
 
-    # Java Style setters
-    def set_root(self, root):
-        path = os.path.join(*root) if isinstance(root, tuple) else root
-        self.root = path
+    def set_default_filename(self):
+        c = Config().get_config()
+        self.default_filename = c['default_filename']
 
-    def set_destination(self, *path, date_path='', reset=False):
-        if not reset:
-            self.destination = os.path.join(self.root, *path, date_path)
-        else:
-            self.destination = os.path.join(*path, date_path)
+    def set_read_folder(self, folder='.'):
+        self.read_folder = os.path.join(*folder) if isinstance(folder, tuple) else folder
 
-    def set_original_filename(self, filename=r'Volumen Rutas.txt'):
-        self.original_filename = filename
-
-    def set_absolute_path_filename(self, filename=''):
+    def set_read_filename(self, filename=None):
         if not filename:
-            filename = self.original_filename
-        self.absolute_path_filename = os.path.join(self.root, filename)
-        if not self.filename:
-            self.filename = self.absolute_path_filename
+            filename = self.default_filename
+        self.read_filename = filename
 
-    # Methods
+    def set_write_folder(self, *path, date_path=''):
+        self.write_folder = os.path.join(*path, date_path)
+
+    def set_write_filename(self, filename):
+        self.write_filename = filename
+
+    def get_write_filename(self):
+        if not self.write_filename:
+            basename, ext = os.path.splitext(self.default_filename)
+            self.write_filename = date.to_format(f'{basename} %Y-%m-%d{ext}')
+        return self.write_filename
+
+    def get_read_filename_absolute_path(self):
+        return os.path.join(self.read_folder, self.read_filename)
+
+    def get_write_filename_absolute_path(self):
+        return os.path.join(self.write_folder, self.get_write_filename())
+
     def move(self):
-        if not os.path.exists(self.destination):
-            os.makedirs(self.destination)
-        fname = date.to_format('%Y-%m-%d.txt')
-        self.filename = os.path.join(self.destination, fname)
-        os.rename(self.absolute_path_filename, self.filename)
+        if not os.path.exists(self.write_folder):
+            os.makedirs(self.write_folder)
+        self.set_write_filename(date.to_format('%Y-%m-%d.txt'))
+        if not os.path.exists(self.get_write_filename_absolute_path()):
+            os.rename(
+                self.get_read_filename_absolute_path(),
+                self.get_write_filename_absolute_path()
+            )
+        # Faking: write now is read.
+        self.set_read_folder(self.write_folder)
+        self.set_read_filename(self.write_filename)
 
-    def read(self):
-        if os.path.exists(self.filename):
-            with open(self.filename, 'r', encoding='utf8') as f:
+    def get_lines(self):
+        if os.path.exists(self.get_read_filename_absolute_path()):
+            with open(self.get_read_filename_absolute_path(), 'r', encoding='utf8') as f:
                 self.lines = f.read()
         else:
-            print("El fitxer '%s' no eixsteix." % self.filename)
+            print("El fitxer '%s' no eixsteix." % self.get_read_filename_absolute_path())
 
     def run(self):
         """
         Define correctly paths and filenames fisrt before running this method.
         """
-        if os.path.exists(self.absolute_path_filename):
+        if os.path.exists(self.get_read_filename_absolute_path()):
             self.move()
         else:
-            files = [f for f in os.listdir(self.destination) if search('[\d-]+\.txt', f)]
+            files = [f for f in os.listdir(self.write_folder) if search('[\d-]+\.txt', f)]
             files.sort()
-            self.filename = os.path.join(self.destination, files[-1])
-        self.read()
+            self.set_read_folder(self.write_folder)
+            self.set_read_filename(files[-1])
+        self.get_lines()
 
-    def show_filenames(self):
-        print(
-            f"FILENAME: {self.filename}\n"
-            f"ABS PATH FILENAME: {self.absolute_path_filename}\n"
-            f"DESTINATION: {self.destination}\n\n"
+    def init(self):
+        self.set_default_filename()
+        self.set_read_folder((path.home(), 'Downloads'))
+        self.set_read_filename()
+        self.set_write_folder(
+            '..', '..',
+            'data', 'berlys',
+            date_path=datetime.strftime(date.to_date(), '%Y$s%m'.replace('$s', os.path.sep)),
         )
+
+    def download_source(self):
+        gmail = GetMail()
+        gmail.login()
+        gmail.dispatch()
+        gmail.close()
 
 
 class Route:
-    routes = (678, 679, 680, 681, 682, 686, 688, 696)
+    route_tuple = (678, 679, 680, 681, 682, 686, 688, 696)
 
     def __init__(self):
 
@@ -267,43 +203,29 @@ class Route:
             r"(?:CAPACIDAD TOTAL CAMIÓN\s+:\s+(?P<truckcap>[\d,.]+) (?P<um3>(?:PVL|KG)))?",
             re.DOTALL
         )
-        self.items = re.compile(
+        self.customers_re = re.compile(
             r"(?P<code>\d{10}) (?P<customer>.{35}) (?P<town>.{20}) (?P<ordnum>.{10}) (?P<vol>.{11})(?: (?P<UM>.{2,3}))?")
-        self.lines = []
 
-    def standard(self):
-        for route in self.routes_re.findall(self.lines):
-            if int(route[0]) in (678, 681, 686):
-                print(f"{route[0]}\t{route[1]}\t{route[2]}\t{route[4]}\t{route[5]}\t{route[6]}\t{route[7]}")
-                for line in self.items.findall(route[3]):
-                    col0 = line[0].strip()
-                    col1 = line[1].strip()
-                    col2 = line[2].strip()
-                    col3 = line[3].strip()
-                    col4 = line[4].strip()
-                    col5 = line[5].strip() if line[5] else ''
-                    print(f"{col0}\t{col1}\t{col2}\t{col3}\t{col4}\t{col5}")
-                print()
-
-    def routing(self, route_ids=(680,)):
+    def dispatch(self, route_ids=(680,)):
         route_volumes = {}
         routes = {}
         volume = 0
         for route in self.routes_re.findall(source.lines):
             if int(route[0]) in route_ids:
-                for line in self.items.findall(route[3]):
+                header = f"{route[2]}\t{route[0]}\t{route[1].lstrip('25 ')}"
+                for line in self.customers_re.findall(route[3]):
                     nom_client = line[1].strip()
                     nom_ciutat = line[2].strip()
                     volum = line[4].strip()
                     # print (f"{nom_client}\t{volum}\tPVL\t({nom_ciutat})")
                     route_volumes[nom_client] = route_volumes.get(nom_client, 0) + string_to_float(volum)
-                    if not routes.get(route[0]):
-                        routes[route[0]] = {}
+                    if not routes.get(header):
+                        routes[header] = {}
                     item = {nom_client: (route_volumes[nom_client], nom_ciutat, route[0])}
-                    routes[route[0]].update(item)
+                    routes[header].update(item)
         i = 1
         for route in routes:
-            print(f'#R{route}')
+            print(route)
             for client in routes[route]:
                 client_volume = routes[route][client][0]
                 volume += client_volume
@@ -316,7 +238,7 @@ class Route:
             for route in self.routes_re.findall(source.lines):
                 if int(route[0]) in route_ids:
                     print(f"{route[0]}")
-                    for line in self.items.findall(route[3]):
+                    for line in self.customers_re.findall(route[3]):
                         nom_client = line[1].strip()
                         nom_ciutat = line[2].strip()
                         volum = line[4].strip()
@@ -329,37 +251,29 @@ class Route:
         routes = dict()
         for route in self.routes_re.findall(text):
             towns = set()
-            if int(route[0]) in self.routes:
-                for line in self.items.findall(route[3]):
+            if int(route[0]) in self.route_tuple:
+                for line in self.customers_re.findall(route[3]):
                     town = line[2].strip()
                     towns.add(town)
                 routes.update({route[0]: towns})
         return routes
 
-
-def dayly():
-    if week_routes.get(wd):
-        route.routing(week_routes[wd])
-    else:
-        raise KeyError('Today you must to take a pause.')
-    print(f"\nDATE: {date.to_short_french_datetime()}")
-
-
-def routes_by_weekday():
-    dir = DirSource()
-    dir.root = r"C:\Users\igorr\OneDrive\Eclipse\Python\dades\Berlys"
-    print(dir.root)
-    dir.run()
+    def dayly(self):
+        if week_routes.get(wd):
+            self.dispatch(week_routes[wd])
+        else:
+            raise KeyError('Today you must to take a pause.')
 
 
 if __name__ == '__main__':
     r"""
     Llegim un fitxer de C:\Users\<USERNAME>\Downloads\Volumen Rutas.txt
-    El reanomenem a C:\Users\<USERNAME>\OneDrive\-\Python\dades\Berlys\<data demà>.txt
+    El reanomenem a C:\Users\<USERNAME>\OneDrive\scripts\data\berlys\<YEAR>\<MONTH>\Volumen Rutas <TOMORROW:%Y-%m-%d>.txt
     
     Si no existeix el fitxer C:\Users\<USERNAME>\Downloads\Volumen Rutas.txt és perque
-    ja s'ha reanomenat i hem de llegir el darrer fitxer mogut a la carpeta C:\Users\<USERNAME>\OneDrive\-\Python\Berlys\
-    amb el format %Y/%m/%d.txt que contindrà les dades que ens interessen.
+    ja s'ha reanomenat i hem de llegir el darrer fitxer mogut a la carpeta
+     C:\Users\<USERNAME>\OneDrive\scripts\data\berlys\<YEAR>\<MONTH>\
+    amb el format "Volumen Rutas %Y/%m/%d.txt" que contindrà les dades que ens interessen.
     """
     set_local_env(time_cat, 'Catalan_Andorra.UTF-8')
     date = DateHandler()
@@ -368,44 +282,42 @@ if __name__ == '__main__':
     wd = date.get_weekday()
 
     source = FileSource()
-    source.set_root((path.home(), 'Downloads'))
-    source.set_destination(
-        path.cwd(),
-        'dades',
-        'Berlys',
-        date_path=datetime.strftime(date.to_date(), '%Y$s%m'.replace('$s', os.path.sep)),
-        reset=True
-    )
-    source.set_original_filename(r'Volumen Rutas.txt')
-    source.set_absolute_path_filename()
-    source.run()
-    # source.show_filenames()
-
     route = Route()
     week_routes = {
         'dl.': (680, 681),
         'dt.': (680, 681),
         'dc.': (680, 681),
-        'dj.': (680, 679),
+        'dj.': (680,),
         'dv.': (680, 688),
         'ds.': (680, 682, 688),
     }
 
     argparser = argparser()
+    argparser.add_argument('-a', '--all', dest='all', action='store_true')
     argparser.add_argument('-d', dest='dayly', action='store_true')
-    argparser.add_argument('-w', dest='weekdays', action='store_true')
-    argparser.add_argument('-r', dest='routelist', type=int, nargs='+')
     argparser.add_argument('-g', dest='mail', action='store_true')
+    argparser.add_argument('-r', dest='routelist', type=int, nargs='+')
+    argparser.add_argument('-w', dest='weekdays', action='store_true')
     args = argparser.parse_args()
 
-    if args.dayly:
-        dayly()
-    if args.weekdays:
-        routes_by_weekday()
-    if args.routelist:
-        route.routing(args.routelist)
     if args.mail:
-        gmail = Gmail()
-        gmail.login()
-        gmail.dispatch()
-        gmail.close()
+        source.download_source()
+
+    if args.dayly:
+        source.init()
+        source.run()
+        route.dayly()
+
+    elif args.routelist:
+        source.init()
+        source.run()
+        route.dispatch(args.routelist)
+
+    elif args.all:
+        source.init()
+        source.run()
+        route.dispatch(route.route_tuple)
+
+    if args.weekdays:
+        directory = DirSource()
+        directory.routes_by_weekday()
