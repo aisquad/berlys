@@ -146,6 +146,7 @@ class FileSource:
         gmail = GetMail()
         gmail.login()
         gmail.dispatch()
+        self.content = gmail.last_data
         gmail.close()
 
 
@@ -168,15 +169,14 @@ class Route:
             re.DOTALL
         )
         self.customers_re = re.compile(
-            r"(?P<costumer_id>\d{10}) (?P<customer>.{35}) (?P<town>.{20}) "
+            r"(?P<customer_id>\d{10}) (?P<customer>.{35}) (?P<town>.{20}) "
             r"(?P<ordnum>.{10}) (?P<vol>.{11})(?: (?P<UM>.{2,3}))?"
         )
 
     def dispatch(self, route_ids=(680,)):
         route_volumes = {}
         routes = {}
-        volume = 0
-        for route in self.routes_re.findall(source.lines):
+        for route in self.routes_re.findall(source.content):
             if int(route[0]) in route_ids:
                 header = f"{route[2]}\t{route[0]}\t{route[1].lstrip('25 ')}"
                 for line in self.customers_re.findall(route[3]):
@@ -189,14 +189,15 @@ class Route:
                     item = {customer_name: (route_volumes[customer_name], town_name, route[0])}
                     routes[header].update(item)
         i = 1
+        volume = 0.0
         for route in routes:
             print(route)
             route_pvl = 0
             for customer in routes[route]:
-                client_volume = routes[route][customer][0]
-                volume += client_volume
-                route_pvl += client_volume
-                print(f'{i}\t\t{customer}\t{local_env_fmt("%.3f", client_volume)}\t{routes[route][customer][1]}')
+                customer_volume = routes[route][customer][0]
+                volume += customer_volume
+                route_pvl += customer_volume
+                print(f'{i}\t\t{customer}\t{local_env_fmt("%.3f", customer_volume)}\t{routes[route][customer][1]}')
                 i += 1
             print(f'\t\troute vol. total:\t\t{local_env_fmt("%.3f", route_pvl)}')
         print(f'\t\tall routes vol. total:\t{local_env_fmt("%.3f", volume)}')
@@ -272,18 +273,15 @@ if __name__ == '__main__':
     if args.mail:
         source.download_source()
 
-    if args.dayly:
-        source.init()
+    if args.daily:
         source.run()
         route.daily()
 
     elif args.routelist:
-        source.init()
         source.run()
         route.dispatch(args.routelist)
 
     elif args.all:
-        source.init()
         source.run()
         route.dispatch(route.route_tuple)
 

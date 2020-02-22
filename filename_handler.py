@@ -24,7 +24,7 @@ class FilenameHandler:
         self.basename, self.ext = os.path.splitext(filename)
         self.path = path
         self.filename = f"{self.basename}{self.ext}"
-        self.absolute_filename = f"{self.path}/{self.filename}"
+        self.absolute_filename = f"{self.path}{self.filename}"
 
     def from_download_dir(self):
         self.set_attributes(self.download_dir, self.default_filename)
@@ -39,15 +39,15 @@ class FilenameHandler:
                 for file in glob(f"{dir_}*.txt"):
                     files.append(file)
         path, filename = os.path.split(files[-1])
-        self.set_attributes(path, filename)
+        self.set_attributes(f"{path}/", filename)
         return self.absolute_filename
 
     def to_data_dir(self, date: DateHandler):
         year = date.get_year()
         month = date.get_month()
-        self.set_attributes(f"{self.data_dir}/{year}/{month}/", f"{date}.txt")
+        self.set_attributes(f"{self.data_dir}{year}/{month:02}/", f"{date.to_short_ISO()}.txt")
         return self.absolute_filename
 
     def to_attachments_dir(self, filename):
-        self.set_attributes(self.attachments_dir, f"{filename}")
+        self.set_attributes(self.attachments_dir, filename)
         return self.absolute_filename

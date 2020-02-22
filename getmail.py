@@ -17,7 +17,7 @@ class Mail:
         self.email_body = email_body.decode()
         self.part = None
         self.params = {}
-        self.content = ''
+        self.content = b''
         self.filename = ''
         self.file_type = ''
         self.file_path = ''
@@ -50,7 +50,9 @@ class Mail:
         content_disp = content_disp.replace("\r\n\t", "").replace('"', '').replace("; ", ";")
         # TODO: more ugly code!
         content_disp = content_disp.replace("=?iso-8859-1?Q?", "").replace("?=", "").replace("=E7", "ç")
-        self.params = dict([(item, True) if item.count("=") == 0 else tuple(item.split("=")) for item in content_disp.split(";")])
+        self.params = dict(
+            [(item, True) if item.count("=") == 0 else tuple(item.split("=")) for item in content_disp.split(";")]
+        )
         self.optimize_size()
         self.optimize_dates()
 
@@ -69,7 +71,7 @@ class Mail:
 
     def set_delivery_date(self):
         if self.file_type == 'data':
-            match = re.match(r'(?P<date>\d{2}(\.)\d{2}\2\d{4})', self.content)
+            match = re.search(r'(?P<date>\d{2}\.\d{2}\.\d{4})', self.content.decode())
             self.delivery_date = DateHandler(match.group('date'))
         else:
             self.delivery_date = DateHandler(self.params['creation-date'])
@@ -80,7 +82,7 @@ class Mail:
             self.part = part
             if self.discard_parts():
                 continue
-            if self.part.get_filename() in (self.config["subject"], self.config['xlsxfile']):
+            if self.part.get_filename() in (self.config["default_filename"], self.config['xlsxfile']):
                 self.parse_params()
                 self.set_file_properties()
                 self.content = self.part.get_payload(decode=True)
@@ -92,7 +94,7 @@ class GetMail:
         set_local_env(time_cat, "en_US.UTF8")
         self.config = None
         self.session = None
-        self.days_ago = 7
+        self.days_ago = 10
         self.sheet_is_saved = False
         self.last_data = ''
         self.last_filename = ''
@@ -113,10 +115,9 @@ class GetMail:
             raise Exception('Not able to sign in!')
 
     def save_file(self, mail: Mail):
-        if not hasattr(mail, 'file_path'):
-            raise AttributeError("file_path attribute is required")
         try:
-            with open(mail.file_path, 'w', encoding='utf8') as fp:
+            with open(mail.file_path, 'wb') as fp:
+                print(f"saving {mail.file_path} (~ {len(mail.content)} b)")
                 fp.write(mail.content)
         except OSError as e:
             print("Rejecting", e, mail.filename)
@@ -132,13 +133,14 @@ class GetMail:
             if not os.path.exists(file_path):
                 mail.file_path = file_path
                 self.save_file(mail)
+
         elif mail.file_type == 'sheet' and not self.sheet_is_saved:
             self.sheet_is_saved = True
-            mail.file_path = fh.to_attachments_dir()
+            mail.file_path = fh.to_attachments_dir(mail.filename)
             self.save_file(mail)
 
     def iterate(self, msg_ids):
-        # Iterating over all emails
+        # Iterating over all selected emails.
         for msg_id in msg_ids:
             type_, message_parts = self.session.fetch(msg_id, '(RFC822)')
 
@@ -152,6 +154,8 @@ class GetMail:
 
     def dispatch(self):
         self.session.select(self.config['label'])
+        if self.session.state != "SELECTED":
+            raise ValueError(f"No such label named '{self.config['label']}'")
         since_date = datetime.today() - timedelta(days=self.days_ago)
         since_date = since_date.strftime("%d-%b-%Y")
         type_, msg_ids = self.session.search(
