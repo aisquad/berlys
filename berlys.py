@@ -114,7 +114,8 @@ class FileSource:
         self.content = ''
 
     def get_delivery_date(self) -> DateHandler:
-        match = re.match(r'(?P<date>\d{2}(\.)\d{2}\2\d{4})', self.content)
+        print (self.content)
+        match = re.search(r'(?P<date>\d{2}(\.)\d{2}\.\d{4})', self.content)
         return DateHandler(match.group('date'))
 
     def move(self):
@@ -264,6 +265,7 @@ if __name__ == '__main__':
     argparser.add_argument('-a', '--all', dest='all', action='store_true')
     argparser.add_argument('-d', dest='daily', action='store_true')
     argparser.add_argument('-g', dest='mail', action='store_true')
+    argparser.add_argument('-m', dest='mailwithlist', type=int, nargs='+')
     argparser.add_argument('-r', dest='routelist', type=int, nargs='+')
     argparser.add_argument('-w', dest='weekdays', action='store_true')
     args = argparser.parse_args()
@@ -272,6 +274,10 @@ if __name__ == '__main__':
 
     if args.mail:
         source.download_source()
+
+    if args.mailwithlist:
+        source.download_source()
+        route.dispatch(args.mailwithlist)
 
     if args.daily:
         source.run()

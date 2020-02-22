@@ -71,7 +71,7 @@ class Mail:
 
     def set_delivery_date(self):
         if self.file_type == 'data':
-            match = re.search(r'(?P<date>\d{2}\.\d{2}\.\d{4})', self.content.decode())
+            match = re.search(r'(?P<date>\d{2}(\.)\d{2}\2\d{4})', self.content.decode())
             self.delivery_date = DateHandler(match.group('date'))
         else:
             self.delivery_date = DateHandler(self.params['creation-date'])
@@ -94,7 +94,7 @@ class GetMail:
         set_local_env(time_cat, "en_US.UTF8")
         self.config = None
         self.session = None
-        self.days_ago = 10
+        self.days_ago = 3
         self.sheet_is_saved = False
         self.last_data = ''
         self.last_filename = ''
@@ -128,7 +128,7 @@ class GetMail:
         if mail.file_type == 'data':
             file_path = fh.to_data_dir(mail.delivery_date)
             if self.last_data == '':
-                self.last_data = mail.content
+                self.last_data = mail.content.decode()
                 self.last_filename = file_path
             if not os.path.exists(file_path):
                 mail.file_path = file_path
